@@ -6,4 +6,4 @@ git+https://github.com/AlanLoh/nenupy
 numba
 stixpy
 stixdcpy
-"sunpy[all]"
+sunpy[all]
