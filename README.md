@@ -23,6 +23,4 @@ You can run the Notebooks online on SOLER's JupyterHub (more info at [soler-hori
 
 #### Use locally
 
-Activate the created virtual environment in the terminal (step 5. of [Installation](#installation)), go to the folder where the tools have been extracted to, and run `jupyter-lab`. This will open the default web-browser. There, open the *.ipynb* files within the separate folders for the specific tools.
-
-
+Activate the created virtual environment in the terminal (step 5. of [Install locally](#install-locally)), go to the folder where the tools have been extracted to, and run `jupyter-lab`. This will open the default web-browser. There, open the *.ipynb* files within the separate folders for the specific tools.
