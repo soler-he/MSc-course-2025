@@ -35,8 +35,8 @@ def analyze_burst_velocity(
     density_model="saito",
     emission_mechanism="F",# "F"=fundamental, "H"=second harmonic
     freq_range=None,
-    fit_method="FWHM",
-    y_scale="frequency",
+    fit_method="FWHM", #"FWHM" or "1/e"
+    y_scale="none",
     fit_mode="none",  # ✅ "none", "single", "split"
     debug=False,        # ✅ Enable/Disable debug plots
     debug_freq_ranges=None,  #None for every channel, and can be multiple ranges, such as [(42, 42.5), (45,46)]
@@ -213,119 +213,72 @@ def analyze_burst_velocity(
             if len(time_seconds) > 3 and len(flux_values) > 3:
                 try:
                     # --- Baseline subtraction and normalization ---
-                    baseline = np.min(flux_values)
-                    flux_corrected = flux_values - baseline
-                    peak_flux_corr = flux_values[peak_idx] - baseline
-                    if peak_flux_corr <= 0:
+                    baseline       = np.min(flux_values)
+                    flux_corr      = flux_values - baseline
+                    peak_corr      = flux_corr[peak_idx]
+                    if peak_corr <= 0:
                         raise ValueError("Peak flux after baseline subtraction is non-positive.")
-                    flux_norm = flux_corrected / peak_flux_corr
+                    flux_norm      = flux_corr / peak_corr
 
-                    # --- Define the burst profile function (normalized) as per Equation (2) ---
-                    # S(t) = [ A * exp(-tau1/(t - toff) - (t - toff)/tau2) + C ] for t >= toff, 0 for t < toff
-                    def burst_profile_norm(t, A, tau1, tau2, toff, C):
-                        dt = t - toff
-                        return np.where(dt > 0, A * np.exp(-tau1/dt - dt/tau2) + C, 0)
-
-                    # --- Initial guesses ---
-                    A0 = 1.0         # normalized peak should be ~1
-                    C0 = np.min(flux_norm)  # ideally near 0
-                    toff0 = time_seconds[0]
-                    tau1_0 = (time_seconds[peak_idx] - toff0) / 2 if (time_seconds[peak_idx]-toff0)>0 else 1.0
-                    tau2_0 = (time_seconds[-1] - time_seconds[peak_idx]) / 2 if (time_seconds[-1]-time_seconds[peak_idx])>0 else 1.0
-                    initial_guess = [A0, tau1_0, tau2_0, toff0, C0]
-
-                    # --- Optional bounds to keep parameters in a reasonable range ---
-                    lower_bounds = [0, 0, 0, time_seconds[0]-1, -0.5]
-                    upper_bounds = [2, 1e4, 1e4, time_seconds[-1]+1, 0.5]
+                    # --- Initial guesses for Gaussian (A, x0, sigma) ---
+                    A0    = 1.0
+                    x0_0  = time_seconds[peak_idx]
+                    sigma0= (time_seconds[-1] - time_seconds[0]) / 4
 
                     popt, _ = optimize.curve_fit(
-                        burst_profile_norm,
+                        gaussian,
                         time_seconds,
                         flux_norm,
-                        p0=initial_guess,
-                        bounds=(lower_bounds, upper_bounds),
+                        p0=[A0, x0_0, sigma0],
                         maxfev=5000
                     )
-                    A_fit, tau1_fit, tau2_fit, toff_fit, C_fit = popt
+                    A_fit, x0_fit, sigma_fit = popt
 
-                    # --- Compute the model peak time as per the paper ---
-                    t_peak = np.sqrt(tau1_fit * tau2_fit) + toff_fit
-                    # --- Define start and end times directly using the fitted τ₁ and τ₂ ---
-                    start_time_fit = t_peak - tau1_fit
-                    end_time_fit = t_peak + tau2_fit
+                    # --- Compute start & end times from width ---
+                    if fit_method == "FWHM":
+                        half_width = 1.177 * sigma_fit    # FWHM = 2*√(2 ln2)*σ → half = 1.177σ
+                    else:  # "1/e" width = σ
+                        half_width = sigma_fit
 
-                    start_time = burst_start_time + start_time_fit / (24 * 3600)
-                    end_time = burst_start_time + end_time_fit / (24 * 3600)
+                    start_time = burst_start_time + (x0_fit - half_width) / (24*3600)
+                    end_time   = burst_start_time + (x0_fit + half_width) / (24*3600)
 
+                    # --- DEBUG PLOTTING (unchanged) ---
                     if debug:
-                        # Check if debug_freq_ranges is provided. If so, only plot for channels within specified ranges.
-                        if debug_freq_ranges is not None:
-                            in_range = any((freq >= fmin and freq <= fmax) for (fmin, fmax) in debug_freq_ranges)
-                            if not in_range:
-                                pass
-                            else:
-                                fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True)
-                                model_fit_norm = burst_profile_norm(time_seconds, *popt)
-                                # Rescale normalized fit back to original flux:
-                                model_fit_real = model_fit_norm * peak_flux_corr + baseline
+                        do_plot = True
+                        if debug_freq_ranges:
+                            do_plot = any(fmin <= freq <= fmax
+                                          for (fmin, fmax) in debug_freq_ranges)
+                        if do_plot:
+                            fig, (ax1, ax2) = plt.subplots(1,2,figsize=(12,4), sharex=True)
+                            # raw flux
+                            ax1.plot(time_seconds, flux_values, 'bo-', label="Raw Flux")
+                            ax1.axvline(x0_fit-half_width, color='green', label="Start")
+                            ax1.axvline(x0_fit+half_width, color='purple', label="End")
+                            ax1.set_title(f"{freq:.2f} MHz Raw")
+                            ax1.legend()
 
-                                # Left: Original flux with re-scaled fit
-                                axes[0].plot(time_seconds, flux_values, 'bo-', label="Original Flux")
-                                axes[0].plot(time_seconds, model_fit_real, 'r--', label="Fitted Profile")
-                                axes[0].axvline(start_time_fit, color='green', linestyle='--', label="Start Time")
-                                axes[0].axvline(end_time_fit, color='purple', linestyle='--', label="End Time")
-                                axes[0].set_title(f"Fit at {freq:.2f} MHz (Real Flux)")
-                                axes[0].set_xlabel("Time (s)")
-                                axes[0].set_ylabel("Flux")
-                                axes[0].legend()
-
-                                # Right: Normalized flux with fit
-                                axes[1].plot(time_seconds, flux_norm, 'bo-', label="Normalized Flux")
-                                axes[1].plot(time_seconds, model_fit_norm, 'r--', label="Fitted Profile")
-                                axes[1].axvline(start_time_fit, color='green', linestyle='--', label="Start Time")
-                                axes[1].axvline(end_time_fit, color='purple', linestyle='--', label="End Time")
-                                axes[1].set_title(f"Fit at {freq:.2f} MHz (Normalized)")
-                                axes[1].set_xlabel("Time (s)")
-                                axes[1].set_ylabel("Normalized Flux")
-                                axes[1].legend()
-
-                                plt.tight_layout()
-                                plt.show()
-                        else:
-                            # Plot debug for every channel if no frequency filtering is specified.
-                            fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True)
-                            model_fit_norm = burst_profile_norm(time_seconds, *popt)
-                            model_fit_real = model_fit_norm * peak_flux_corr + baseline
-
-                            axes[0].plot(time_seconds, flux_values, 'bo-', label="Original Flux")
-                            axes[0].plot(time_seconds, model_fit_real, 'r--', label="Fitted Profile")
-                            axes[0].axvline(start_time_fit, color='green', linestyle='--', label="Start Time")
-                            axes[0].axvline(end_time_fit, color='purple', linestyle='--', label="End Time")
-                            axes[0].set_title(f"Fit at {freq:.2f} MHz (Real Flux)")
-                            axes[0].set_xlabel("Time (s)")
-                            axes[0].set_ylabel("Flux")
-                            axes[0].legend()
-
-                            axes[1].plot(time_seconds, flux_norm, 'bo-', label="Normalized Flux")
-                            axes[1].plot(time_seconds, model_fit_norm, 'r--', label="Fitted Profile")
-                            axes[1].axvline(start_time_fit, color='green', linestyle='--', label="Start Time")
-                            axes[1].axvline(end_time_fit, color='purple', linestyle='--', label="End Time")
-                            axes[1].set_title(f"Fit at {freq:.2f} MHz (Normalized)")
-                            axes[1].set_xlabel("Time (s)")
-                            axes[1].set_ylabel("Normalized Flux")
-                            axes[1].legend()
+                            # normalized + fit
+                            ax2.plot(time_seconds, flux_norm, 'bo-', label="Normalized")
+                            tt = np.linspace(time_seconds.min(), time_seconds.max(), 200)
+                            ax2.plot(tt, gaussian(tt, *popt), 'r--', label="Gaussian Fit")
+                            ax2.axvline(x0_fit-half_width, color='green', label="Start")
+                            ax2.axvline(x0_fit+half_width, color='purple', label="End")
+                            ax2.set_title(f"{freq:.2f} MHz Fit")
+                            ax2.legend()
 
                             plt.tight_layout()
                             plt.show()
 
                 except Exception as e:
-                    print(f"⚠️ Single fit failed: {e}")
+                    print(f"⚠️ Gaussian fit failed at {freq:.2f} MHz: {e}")
                     start_time = np.nan
-                    end_time = np.nan
-                
-                # Ensure we append a result for this channel regardless of fit success.
+                    end_time   = np.nan
+
+                # Always append (even if NaN)
                 start_times.append(start_time)
                 end_times.append(end_time)
+
                 
         elif fit_mode == "split":
             # 1) Identify the global maximum for this channel
@@ -584,11 +537,6 @@ def analyze_burst_velocity(
             + 1.39e6* r_solar**(-2.3)
             + 3e11  * np.exp(-(r_solar - 1.0) / (20.0/960.0))
         )
-        models["dndr_leblanc98"] = (
-            -2*3.3e5  * r_solar**(-3)
-            -4*4.1e6  * r_solar**(-5)
-            -6*8.0e7  * r_solar**(-7)
-        )
 
         # 3) Compute burst‐range densities
         #    fundamental:
@@ -691,32 +639,59 @@ def analyze_burst_velocity(
     vmin, vmax = np.nanpercentile(roi_data, [5, 95])
 
     if y_scale == "inverse":
-        # ✅ Transform data to inverse scale
-        transformed_freq_values = 1 / roi_freq_values
-        transformed_peak_freqs = 1 / peak_freqs
-        transformed_start_freqs = 1 / peak_freqs
-        transformed_end_freqs = 1 / peak_freqs
-        
-        extent = [roi_time_mpl[0], roi_time_mpl[-1], 
-                transformed_freq_values[0], transformed_freq_values[-1]]
-        
-        # ✅ Plot dynamic spectrum
-        im = axs[0].imshow(roi_data.T, aspect="auto", origin="lower", extent=extent,
-                        cmap="viridis", vmin=vmin, vmax=vmax)
-        
-        # ✅ Plot transformed data points
-        axs[0].scatter(peak_times, transformed_peak_freqs, color="black", marker="+", label="Peak Flux", zorder=5)
-        axs[0].scatter(start_times, transformed_start_freqs, color="red", marker="+", label="Start Rise", zorder=5)
-        axs[0].scatter(end_times, transformed_end_freqs, color="blue", marker="+", label="End Decay", zorder=5)
+        # use nanpercentile for robust color limits
+        vmin, vmax = np.nanpercentile(roi_data, [5, 95])
+
+        # build an inverse‐frequency axis (1 / MHz)
+        inv_freq = 1.0 / roi_freq_values  # shape (nfreq,)
+
+        # prepare meshgrid for pcolormesh: Time along x, inv_freq along y
+        T, F = np.meshgrid(roi_time_mpl, inv_freq)
+
+        # plot with pcolormesh so the non‐uniform y‐spacing is handled
+        im = axs[0].pcolormesh(
+            T, F, roi_data.T,
+            shading="auto",
+            cmap="viridis",
+            vmin=vmin, vmax=vmax
+        )
+        axs[0].invert_yaxis()
+
+        # overlay the inverse‐frequency scatter points (peak, start, end)
+        axs[0].scatter(
+            peak_times,
+            1.0 / peak_freqs,
+            color="black", marker="+",
+            label="Peak Flux", zorder=5
+        )
+        axs[0].scatter(
+            start_times,
+            1.0 / peak_freqs,
+            color="red", marker="+",
+            label="Start Rise", zorder=5
+        )
+        axs[0].scatter(
+            end_times,
+            1.0 / peak_freqs,
+            color="blue", marker="+",
+            label="End Decay", zorder=5
+        )
 
         axs[0].set_ylabel("1 / Frequency (1/MHz)")
+        axs[0].set_title(f"Dynamic Spectrum for Burst {burst['number']}")
 
-        # add a secondary y‐axis on the right that shows real MHz
-        sec = axs[0].secondary_yaxis(
+        # add a right‐hand axis in actual MHz
+        import matplotlib.ticker as ticker
+        secax = axs[0].secondary_yaxis(
             'right',
             functions=(lambda inv: 1.0/inv, lambda f: 1.0/f)
         )
-        sec.set_ylabel("Frequency (MHz)")
+        secax.set_ylabel("Frequency (MHz)")
+        secax.yaxis.set_major_formatter(ticker.ScalarFormatter(useMathText=False))
+        secax.yaxis.set_minor_formatter(ticker.NullFormatter())
+
+        # colorbar
+        fig.colorbar(im, ax=axs[0], label="Amplitude")
 
     elif y_scale == "log":
         extent = [roi_time_mpl[0], roi_time_mpl[-1], roi_freq_values[0], roi_freq_values[-1]]
