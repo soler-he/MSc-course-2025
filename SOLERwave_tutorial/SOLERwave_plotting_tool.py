@@ -415,12 +415,12 @@ def plot_perturbation_profiles(distance, intensity_mean, intensity_var, d_peak_m
 
     single_plot_kwargs = {'nr_of_colums': 5, 'nr_of_lines': 4, 'y_min': linplot_ylim[0], 'y_max': linplot_ylim[1]}
 
-    d_trail_mat_ = d_trail_mat[j, :, :]
-    d_front_mat_ = d_front_mat[j, :, :]
-    trail_mat_ = trail_mat[j, :, :]
-    front_mat_ = front_mat[j, :, :]
-    d_peak_mat_ = d_peak_mat[j, :, :]
-    peak_mat_ = peak_mat[j, :, :]
+    d_trail_mat_ = np.copy(d_trail_mat[j, :, :])
+    d_front_mat_ = np.copy(d_front_mat[j, :, :])
+    trail_mat_ = np.copy(trail_mat[j, :, :])
+    front_mat_ = np.copy(front_mat[j, :, :])
+    d_peak_mat_ = np.copy(d_peak_mat[j, :, :])
+    peak_mat_ = np.copy(peak_mat[j, :, :])
 
     file_path_dict_ = file_path_dict.copy()
 
@@ -522,6 +522,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
     wave_peak_color = 'cyan'
     peak_front_marker ='X' #https://matplotlib.org/stable/api/markers_api.html
     font_size = 30
+    wave_peak_front_linewidth = 2
 
     if len(file_path_dict) != 0 and ((len(filename_appendix) != 0) or (len(save_path) != 0)):
         now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
@@ -703,7 +704,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
                                   observer=Flare_coordinates.observer,
                                   frame=Heliocentric).transform_to(Flare_coordinates.frame)
 
-            ax.plot_coord(coords_sky, '--',color = peak_color)
+            ax.plot_coord(coords_sky, '--',color = peak_color,linewidth = wave_peak_front_linewidth)
 
             #################################################################################################
             aaa_mat_front = np.zeros_like(theta_mat)
@@ -718,7 +719,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
                                   observer=Flare_coordinates.observer,
                                   frame=Heliocentric).transform_to(Flare_coordinates.frame)
 
-            ax.plot_coord(coords_sky, '--',color =front_color)
+            ax.plot_coord(coords_sky, '--',color =front_color,linewidth = wave_peak_front_linewidth)
 
 
         if plot_wavepeak:
@@ -744,7 +745,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
                                   observer=Flare_coordinates.observer,
                                   frame=Heliocentric).transform_to(Flare_coordinates.frame)
 
-            ax.plot_coord(coords_sky, '--',color = wave_peak_color)
+            ax.plot_coord(coords_sky, '--',color = wave_peak_color,linewidth = wave_peak_front_linewidth)
 
             ############################################################################################
             aaa_mat_peak = np.zeros_like(theta_mat)
@@ -759,7 +760,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
                                   observer=Flare_coordinates.observer,
                                   frame=Heliocentric).transform_to(Flare_coordinates.frame)
 
-            ax.plot_coord(coords_sky, '--', color=front_color)
+            ax.plot_coord(coords_sky, '--', color=front_color,linewidth = wave_peak_front_linewidth)
 
 
         ####################################################
