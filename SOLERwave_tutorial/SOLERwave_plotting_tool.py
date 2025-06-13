@@ -470,7 +470,10 @@ def plot_perturbation_profiles(distance, intensity_mean, intensity_var, d_peak_m
 def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_base, intensity_mean, intensity_var, time, distance, linplot_ylim,
                                         wave_peak_kwargs, segment_kwargs, str_direct_width, lower_Tx_lim=0, lower_Ty_lim=0, Tx_Ty_range=0,
                                         Tx_Ty_aspect_ratio = False, Tx_lim=[], Ty_lim =[], plot_wavepeak=True, plot_peaks = True,
-                                        plot_sector=True, scale_max = 2, scale_min = 0, file_path_dict = [], save_path = [], filename_appendix = [], distance_marker = True, contrast_mode = False):
+                                        plot_sector=True, scale_max = 2, scale_min = 0, file_path_dict = [], save_path = [],
+                                        filename_appendix = [], distance_marker = True, contrast_mode = False,
+                                        quicklook = False,auto_framing = True,
+                                        add_overlay_function = False, overlay_function = None, overlay_function_keywords = []):
     """ Creates a Movie for 1 sector with the perturbation profile on the left side and the base ratio image on the right
 
     :param segment_nr:      int, index of sector defined by theta range
@@ -559,30 +562,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
     intensity_slice_mean = intensity_mean[:, j, :]
     intensity_slice_std = np.sqrt(intensity_var[:, j, :])
 
-    #####################################################
-    # Limits for the Map Plot
-    #####################################################
-    # If no range is given and no Tx_lim, use full width
-    if (Tx_Ty_range == 0) & (len(Tx_lim)==0):
-        Tx_lim = [map_series[0].bottom_left_coord.Tx.value, map_series[0].top_right_coord.Tx.value]
-    # If no range is given and no Ty_lim, use full width
-    if (Tx_Ty_range == 0) & (len(Ty_lim)==0):
-        Ty_lim = [map_series[0].bottom_left_coord.Ty.value, map_series[0].top_right_coord.Ty.value]
-
-    if not Tx_Ty_aspect_ratio:
-        Tx_lim = [lower_Tx_lim,lower_Tx_lim+Tx_Ty_range]
-        Ty_lim = [lower_Ty_lim,lower_Ty_lim+Tx_Ty_range]
-
-    roi_bottom_left = SkyCoord(Tx=Tx_lim[0] * u.arcsec, Ty=Ty_lim[0] * u.arcsec, frame=map_series[0].coordinate_frame)
-    roi_top_right = SkyCoord(Tx=Tx_lim[1] * u.arcsec, Ty=Ty_lim[1] * u.arcsec, frame=map_series[0].coordinate_frame)
-
-    ylim_low,xlim_low = map_series[0].wcs.world_to_array_index(roi_bottom_left)
-    ylim_high,xlim_high = map_series[0].wcs.world_to_array_index(roi_top_right)
-
     map_unit = u.dimensionless_unscaled
-    #####################################################
-
-    theta_angle = (theta_range[j] + theta_range[j + 1]) / 2
 
     if plot_sector:
         mask_3 = segment_kwargs['mask_3']
@@ -594,7 +574,6 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
 
         m_t_1 = sunpy.map.Map(mask_2_plot * map_unit, map_series[0].fits_header)
         contours1 = m_t_1.contour(0.5 * u.dimensionless_unscaled)
-
 
     if plot_wavepeak or plot_peaks:
         d_peak_mat = wave_peak_kwargs['d_peak_mat']
@@ -613,6 +592,77 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
         max_values = peak_mat[j,:,:]
         front_values = front_mat[j,:,:]
 
+    #####################################################
+    # Limits for the Map Plot
+    #####################################################
+    # If no range is given and no Tx_lim, use full width
+    if (Tx_Ty_range == 0) & (len(Tx_lim)==0):
+        Tx_lim = [map_series[0].bottom_left_coord.Tx.value, map_series[0].top_right_coord.Tx.value]
+    # If no range is given and no Ty_lim, use full width
+    if (Tx_Ty_range == 0) & (len(Ty_lim)==0):
+        Ty_lim = [map_series[0].bottom_left_coord.Ty.value, map_series[0].top_right_coord.Ty.value]
+
+    if not Tx_Ty_aspect_ratio:
+        Tx_lim = [lower_Tx_lim,lower_Tx_lim+Tx_Ty_range]
+        Ty_lim = [lower_Ty_lim,lower_Ty_lim+Tx_Ty_range]
+
+    if plot_sector & auto_framing:
+        additional_area_in_arcsec = 150
+        # The tx,ty values of the sector in arc seconds
+        tx_vals = contours1[0].Tx.value
+        ty_vals = contours1[0].Ty.value
+
+        # Add the Flare coordinates in arcsec to the arrays
+        tx_vals = np.append(tx_vals, Flare_coordinates.Tx.value)
+        ty_vals = np.append(ty_vals, Flare_coordinates.Ty.value)
+
+        # Set a 100 arcsec Border around area of interest
+        Tx_lim_needed = [np.min(tx_vals)-additional_area_in_arcsec,np.max(tx_vals)+additional_area_in_arcsec]
+        Tx_lim_diff = np.diff(Tx_lim_needed)[0]
+
+        Ty_lim_needed = [np.min(ty_vals)-additional_area_in_arcsec,np.max(ty_vals)+additional_area_in_arcsec]
+        Ty_lim_diff = np.diff(Ty_lim_needed)[0]
+
+        if Tx_lim_diff > Ty_lim_diff:
+            # Add Area to Ty_lim to make the aspect ratio a square
+            Ty_lim_needed[0] = Ty_lim_needed[0]-((Tx_lim_diff-Ty_lim_diff)/2)
+            Ty_lim_needed[1] = Ty_lim_needed[1]+((Tx_lim_diff-Ty_lim_diff)/2)
+        elif Tx_lim_diff < Ty_lim_diff:
+            # Add Area to Tx_lim to make the aspect ratio a square
+            Tx_lim_needed[0] = Tx_lim_needed[0] - ((Ty_lim_diff - Tx_lim_diff) / 2)
+            Tx_lim_needed[1] = Tx_lim_needed[1] + ((Ty_lim_diff - Tx_lim_diff) / 2)
+
+        Tx_lim = Tx_lim_needed
+        Ty_lim = Ty_lim_needed
+
+    roi_bottom_left = SkyCoord(Tx=Tx_lim[0] * u.arcsec, Ty=Ty_lim[0] * u.arcsec, frame=map_series[0].coordinate_frame)
+    roi_top_right = SkyCoord(Tx=Tx_lim[1] * u.arcsec, Ty=Ty_lim[1] * u.arcsec, frame=map_series[0].coordinate_frame)
+
+    ylim_low,xlim_low = map_series[0].wcs.world_to_array_index(roi_bottom_left)
+    ylim_high,xlim_high = map_series[0].wcs.world_to_array_index(roi_top_right)
+
+
+    #####################################################
+
+    theta_angle = (theta_range[j] + theta_range[j + 1]) / 2
+
+
+
+
+
+
+
+
+
+    # In case of a quicklook only 4 images are produced
+    if quicklook:
+        time_index_range = np.linspace(0,len(time)-1,4,dtype=int)
+
+        now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
+        print(now + ' plot_timeseries_of_lineplot_and_map: Quick Look, only 4 images are produces. Rerun with quicklook == False to create a movie')
+    else:
+        time_index_range = range(len(time))
+
     # Formating and creating a progress bar
     # https://builtin.com/software-engineering-perspectives/python-progress-bar:
     from tqdm import tqdm
@@ -620,7 +670,7 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
     now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
     text = now + ' plot_timeseries_of_lineplot_and_map: Frames for Movie :'
 
-    for t in tqdm(range(len(time)),desc = text,file=sys.stdout):
+    for t in tqdm(time_index_range,desc = text,file=sys.stdout):
         #print(f'Video Frame {t} of {len(time)}')
 
 
@@ -648,6 +698,8 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
         ax.set_ylabel(y_label,size=font_size)
         ax.tick_params(axis='both', which='major', labelsize=font_size*3/4)
 
+        if add_overlay_function:
+            overlay_function(ax,t,**overlay_function_keywords)
 
         if distance_marker:
             vec1 = np.linspace(0,1000,11)
@@ -824,40 +876,46 @@ def plot_timeseries_of_lineplot_and_map(segment_nr, theta_range, map_series, m_b
         im1 = im.crop((left, top, right, bottom))
         im1.save(image_path)
 
-        plt.close()
+        # Only close plots if they are not shown as quicklook
+        if not quicklook:
+            plt.close()
 
     ##############################################
     # Create Movie
     ##############################################
-    import moviepy.video.io.ImageSequenceClip
-    import glob
+    # Only produces the movie if there is no quicklook
+    if not quicklook:
+        import moviepy.video.io.ImageSequenceClip
+        import glob
 
-    image_files = sorted(glob.glob(path_LVL_0_Results_0_Diagnostics_MI + '/*.png'))
-    clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_files, fps=7)
-    #clip.write_videofile(path_name[:11] + video_name + '.mp4')
+        image_files = sorted(glob.glob(path_LVL_0_Results_0_Diagnostics_MI + '/*.png'))
+        clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_files, fps=7)
+        #clip.write_videofile(path_name[:11] + video_name + '.mp4')
 
-    #########################################################################
-    # Saving the plot
-    #########################################################################
+        #########################################################################
+        # Saving the plot
+        #########################################################################
 
-    if len(file_path_dict) != 0 and ((len(filename_appendix) != 0) or (len(save_path) != 0)):
-        now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
-        print(now + ' Movie Plot : Warning: both a file_path_dict and a save_path and/or name appendix where given. '
-                    'Only the file_path_dict was used')  # TODO: might ues an actual waring package
+        if len(file_path_dict) != 0 and ((len(filename_appendix) != 0) or (len(save_path) != 0)):
+            now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
+            print(now + ' plot_timeseries_of_lineplot_and_map : Warning: both a file_path_dict and a save_path and/or name appendix where given. '
+                        'Only the file_path_dict was used')  # TODO: might ues an actual waring package
 
-    if plot_peaks:
-        movie_path = os.path.join(path_LVL_0_Results_0_Diagnostics,'movie_all_peaks'+ filename_appendix)
-    else:
-        movie_path = os.path.join(path_LVL_0_Results_0,'wave_movie' + filename_appendix)
+        if plot_peaks:
+            movie_path = os.path.join(path_LVL_0_Results_0_Diagnostics,'movie_all_peaks'+ filename_appendix)
+        else:
+            movie_path = os.path.join(path_LVL_0_Results_0,'wave_movie' + filename_appendix)
 
-    clip.write_videofile(movie_path + '.mp4')
+        clip.write_videofile(movie_path + '.mp4')
     return
 
 
 def plot_timeseries_of_lineplot_and_map_V2(segment_nr, theta_range, map_series, m_base, intensity_mean, intensity_var, time, distance, linplot_ylim,
                                         wave_peak_kwargs, segment_kwargs, str_direct_width, lower_Tx_lim=0, lower_Ty_lim=0, Tx_Ty_range=0,
                                         Tx_Ty_aspect_ratio = False, Tx_lim=[], Ty_lim =[], plot_wavepeak=True, plot_peaks = True,
-                                        plot_sector=True, scale_max = 2, scale_min = 0, file_path_dict = [], save_path = [], filename_appendix = [], distance_marker = True, contrast_mode = False):
+                                        plot_sector=True, scale_max = 2, scale_min = 0, file_path_dict = [], save_path = [],
+                                        filename_appendix = [], distance_marker = True, contrast_mode = False,
+                                        quicklook = False):
     """ Creates a Movie for 1 sector with the perturbation profile on the left side and the base ratio image on the right
 
     :param segment_nr:      int, index of sector defined by theta range
@@ -999,6 +1057,11 @@ def plot_timeseries_of_lineplot_and_map_V2(segment_nr, theta_range, map_series, 
         max_values = peak_mat[j,:,:]
         front_values = front_mat[j,:,:]
 
+    if quicklook:
+        time_index_range = np.arange(0,len(time),np.floor(len(time)/4))
+    else:
+        time_index_range = range(len(time))
+
     # Formating and creating a progress bar
     # https://builtin.com/software-engineering-perspectives/python-progress-bar:
     from tqdm import tqdm
@@ -1006,7 +1069,7 @@ def plot_timeseries_of_lineplot_and_map_V2(segment_nr, theta_range, map_series, 
     now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
     text = now + ' plot_timeseries_of_lineplot_and_map: Frames for Movie :'
 
-    for t in tqdm(range(len(time)),desc = text,file=sys.stdout):
+    for t in tqdm(time_index_range,desc = text,file=sys.stdout):
         #print(f'Video Frame {t} of {len(time)}')
 
 
@@ -1211,33 +1274,37 @@ def plot_timeseries_of_lineplot_and_map_V2(segment_nr, theta_range, map_series, 
         im1 = im.crop((left, top, right, bottom))
         im1.save(image_path)
 
-        plt.close()
+        # Closes the images only if quicklook is set to False
+        if quicklook == False:
+            plt.close()
 
     ##############################################
     # Create Movie
     ##############################################
-    import moviepy.video.io.ImageSequenceClip
-    import glob
+    # Only creates a video if quicklook is set to false
+    if quicklook == False:
+        import moviepy.video.io.ImageSequenceClip
+        import glob
 
-    image_files = sorted(glob.glob(path_LVL_0_Results_0_Diagnostics_MI + '/*.png'))
-    clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_files, fps=7)
-    #clip.write_videofile(path_name[:11] + video_name + '.mp4')
+        image_files = sorted(glob.glob(path_LVL_0_Results_0_Diagnostics_MI + '/*.png'))
+        clip = moviepy.video.io.ImageSequenceClip.ImageSequenceClip(image_files, fps=7)
+        #clip.write_videofile(path_name[:11] + video_name + '.mp4')
 
-    #########################################################################
-    # Saving the plot
-    #########################################################################
+        #########################################################################
+        # Saving the plot
+        #########################################################################
 
-    if len(file_path_dict) != 0 and ((len(filename_appendix) != 0) or (len(save_path) != 0)):
-        now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
-        print(now + ' Movie Plot : Warning: both a file_path_dict and a save_path and/or name appendix where given. '
-                    'Only the file_path_dict was used')  # TODO: might ues an actual waring package
+        if len(file_path_dict) != 0 and ((len(filename_appendix) != 0) or (len(save_path) != 0)):
+            now = tm.strftime("%H:%M:%S", tm.localtime(tm.time()))
+            print(now + ' Movie Plot : Warning: both a file_path_dict and a save_path and/or name appendix where given. '
+                        'Only the file_path_dict was used')  # TODO: might ues an actual waring package
 
-    if plot_peaks:
-        movie_path = os.path.join(path_LVL_0_Results_0_Diagnostics,'movie_all_peaks'+ filename_appendix)
-    else:
-        movie_path = os.path.join(path_LVL_0_Results_0,'wave_movie' + filename_appendix)
+        if plot_peaks:
+            movie_path = os.path.join(path_LVL_0_Results_0_Diagnostics,'movie_all_peaks'+ filename_appendix)
+        else:
+            movie_path = os.path.join(path_LVL_0_Results_0,'wave_movie' + filename_appendix)
 
-    clip.write_videofile(movie_path + '.mp4')
+        clip.write_videofile(movie_path + '.mp4')
     return
 
 
